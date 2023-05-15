@@ -12,10 +12,24 @@ classdef LabelWriter < handle
     methods
         function obj = LabelWriter(pth, header)
             
-            
+            if nargin<2 || isempty(header)
+                obj.header_raw = '#';
+            else
+                obj.header_raw = header;
+            end           
 
             obj.pth = pth;
-            obj.fid = fopen(fullfile(obj.pth, filename),'a');
+            path_full = fullfile(obj.pth, 'label.csv');
+            if not(exist(path_full,'file'))
+                file_is_new = true;
+            else
+                file_is_new = false;
+            end
+            obj.fid = LazyFileReader(path_full);
+            
+            if file_is_new
+                obj.fid.writeLine(obj.header_raw);
+            end
 
             % header
             obj.header_raw = obj.fid.readLine(1);
@@ -39,6 +53,11 @@ classdef LabelWriter < handle
             tline = obj.fid.getPreviousLine();
             [frame,info] = line2frame(tline, obj.file_info.ROI_y, obj.file_info.ROI_x);
         end
+        
+        function [frame, info] = readLine(obj, i)
+            tline = obj.fid.readLine(i);
+            [frame,info] = line2frame(tline, obj.file_info.ROI_y, obj.file_info.ROI_x);
+        end
 
         function check = hasNext(obj)
             check = obj.fid.currentLineIndex<obj.fid.totalLines;
@@ -51,6 +70,11 @@ classdef LabelWriter < handle
         function reset(obj)
             % starts from the beginning skipping the header
             obj.fid.goToLine(2);
+        end
+
+        function addLine(obj, frame, id)
+            % TODO controlla se frame2line posso farla meglio
+            obj.fid.writeLine(frame2line(frame,id))
         end
 
         function perc = progress(obj)

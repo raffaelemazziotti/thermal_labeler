@@ -36,7 +36,7 @@ classdef LazyFileReader < handle
         end
 
         function writeLine(obj,line)
-            fseek(obj.fileID, 0, 'eof')
+            fseek(obj.fileID, 0, 'eof');
             fprintf(obj.fileID,'%s\n',line);
             obj.totalLines = obj.totalLines+1;
             obj.currentLineIndex=obj.totalLines;
