@@ -17,7 +17,7 @@ classdef LazyFileReader < handle
             %   Usage: obj = LazyFileReader(filePath)
             %     - filePath: File path as a string
 
-            obj.fileID = fopen(filePath, 'r');
+            obj.fileID = fopen(filePath, 'a+');
             obj.totalLines = obj.countLines();
             obj.currentLineIndex=1;
         end
@@ -33,6 +33,13 @@ classdef LazyFileReader < handle
             for i = 1:lineNumber
                 line = fgetl(obj.fileID);
             end
+        end
+
+        function writeLine(obj,line)
+            fseek(obj.fileID, 0, 'eof')
+            fprintf(obj.fileID,'%s\n',line);
+            obj.totalLines = obj.totalLines+1;
+            obj.currentLineIndex=obj.totalLines;
         end
 
         function currentLine = getCurrentLine(obj)
