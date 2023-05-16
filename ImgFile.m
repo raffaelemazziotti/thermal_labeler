@@ -47,7 +47,7 @@ classdef ImgFile < handle
         end
 
         function check = hasPrevious(obj)
-            check = obj.fid.currentLineIndex>1;
+            check = obj.fid.currentLineIndex>2;
         end
 
         function reset(obj)
