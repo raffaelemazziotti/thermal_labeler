@@ -21,8 +21,8 @@ classdef RecManager<handle
         end
 
         function sync(obj)
-            obj.file_img.fid.goToLine(obj.file_label.fid.totalLines)
-            obj.file_label.fid.goToLine(obj.file_label.fid.totalLines)
+            obj.file_img.fid.goToLine(obj.file_label.fid.totalLines);
+            obj.file_label.fid.goToLine(obj.file_label.fid.totalLines);
             obj.img_current_index = obj.file_img.fid.currentLineIndex;
         end
 
@@ -74,23 +74,28 @@ classdef RecManager<handle
 
                 if ~isempty(obj.img_buffer)
                     dove = ismember([obj.img_buffer(:).id], img_id);
+                    is_editable = 1;
                 else
                     dove = 0;
+                    is_editable = 0;
                 end
 
                 if any(dove)
-                    lbl_id = obj.img_buffer(find(dove)).id;
-                    lbl = obj.img_buffer(find(dove)).lbl;
-                    is_editable = 1;
+                    pos = find(dove);
+
+                    lbl_id = obj.img_buffer(pos).id;
+                    lbl = obj.img_buffer(pos).lbl;
+                    
+                    
                 else
                     if obj.file_label.hasPrevious
-                        [lbl, lbl_id] = obj.file_label.readPrevious;
-                        is_editable = 0;
+                        [lbl, lbl_id] = obj.file_label.readLine(obj.img_current_index-1);
+                        
                     else
                         img=[];
                         lbl=[];
                         img_id=[];
-                        is_editable = 0;
+                        
                         return
                     end
                 end
