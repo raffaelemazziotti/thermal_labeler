@@ -37,15 +37,16 @@ classdef RecManager_id<handle
                 obj.file_label.writeLine(obj.header_raw);
             end
 
+            obj.totalLineFrames = obj.file_img.totalLines-1;
+            obj.totalLineLabels = obj.file_label.totalLines-1;
+
             if obj.file_label.totalLines==1
                 obj.currentLine = 2;
             else
                 obj.currentLine = obj.totalLineLabels;
             end
 
-            obj.totalLineFrames = obj.file_img.totalLines-1;
-
-            obj.totalLineLabels = obj.file_label.totalLines-1;
+            
             obj.sync();
             
         end
@@ -64,6 +65,10 @@ classdef RecManager_id<handle
                 end
                 obj.lastWrittenLabel_id=max(ids);
             end
+        end
+    
+        function [img, lbl, id, is_editable] = getFrameCurrent(obj)
+            [img, lbl, id, is_editable] = getFrameAtIndex(obj,obj.currentLine);
         end
 
         function [img, lbl, id, is_editable] = getFrameNext(obj)
@@ -99,7 +104,7 @@ classdef RecManager_id<handle
                     obj.img_buffer(obj.img_buffer_n_elem).id = lbl_id;
                 end
             else
-                raw = obj.file_img.readLine(index);
+                raw = obj.file_label.readLine(index);
                 [lbl, lbl_id] = line2frame(raw,obj.file_info.ROI_y,obj.file_info.ROI_x);
             end
             
@@ -128,12 +133,25 @@ classdef RecManager_id<handle
         end
 
         function writeBuffer(obj)
-            for b=1:length(obj.img_buffer)
-                obj.file_label.writeLine(frame2line(obj.img_buffer(b).lbl, obj.img_buffer(b).id))
+            if ~isempty(obj.img_buffer)
+                ids = [obj.img_buffer.id];
+                
+                % controla se quello che verrà scritto già c'è
+                if min(ids)<=obj.lastWrittenLabel_id
+                    error('ID overlap error!')
+                end
+
+                % riordino il buffer
+                [t,order] = sort(ids);
+                obj.img_buffer = obj.img_buffer(order);
+
+                for b=1:length(obj.img_buffer)
+                    obj.file_label.writeLine(frame2line(obj.img_buffer(b).lbl, obj.img_buffer(b).id))
+                end
+                obj.img_buffer = [];
+                obj.img_buffer_n_elem=0;
+                obj.sync();
             end
-            obj.img_buffer = [];
-            obj.img_buffer_n_elem=0;
-            obj.sync();
         end
 
         function frac = progress(obj)
