@@ -15,3 +15,4 @@ function filt = findMouseCV(frame)
     %to_img = cat(2,frame,filt) ;
     %subplot(2,1,2);
     filt = filt>2;
+    filt = bwareaopen(filt,250);
