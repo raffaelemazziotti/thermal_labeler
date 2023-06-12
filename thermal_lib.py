@@ -9,6 +9,7 @@ import os
 
 hour2radians = lambda x: ((x%24)/24)*2*np.pi
 radians2hour = lambda x: ((x%(2*np.pi))/(2*np.pi))*24
+wrap2pi = lambda phases: (phases + np.pi) % (2 * np.pi) - np.pi
 
 
 class Subjects():
