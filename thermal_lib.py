@@ -13,7 +13,7 @@ radians2hour = lambda x: ((x%(2*np.pi))/(2*np.pi))*24
 
 class Subjects():
 
-    def __init__(self,pth=None):
+    def __init__(self, pth=None):
         if pth is None:
             pth = Path(os.getcwd())/'thermal_data'
 
