@@ -71,7 +71,8 @@ class Subjects():
         if not( where_to_save.is_file() ):
             data = list()
             for i,rec in enumerate(self.subjects.loc[idx,'rec_path']):
-                df = dd.read_csv(rec,sep=';', skiprows=1,dtype={'isDay': 'float64'}, parse_dates=['Date'])
+                #df = dd.read_csv(rec,sep=';', skiprows=1,dtype={'isDay': 'float64'}, parse_dates=['Date'])
+                df = pd.read_csv(rec,sep=';', parse_dates=['Date'], skiprows=1 )
                 df['temp_med_delta'] = (df['temp_med']-df['temp_med'].mean())
                 df['distance'] = self.euclid(df)
                 df['RT_delta'] = df['RT']-df['RT'].mean()
@@ -90,9 +91,11 @@ class Subjects():
             data_min['RT_norm'] = data_min['RT']-data_min['RT'].mean()
             data_min['temp_rt_corrected'] = data_min['temp_norm']-data_min['RT_norm']
             data_min = data_min.drop(['ID','timeStamp'],axis=1).reset_index()
+            data_min = data_min.sort_values(by='minute').reset_index(drop=True)
             data_min.to_csv(where_to_save.as_posix(),sep=';')
         else:
             data_min = pd.read_csv(where_to_save.as_posix(),sep=';',index_col=0)
+            #data_min = data_min.sort_values(by='minute').reset_index(drop=True)
 
         return data_min
 
@@ -125,9 +128,11 @@ class Subjects():
             data_day['RT_norm'] = data_day['RT']-data_day['RT'].mean()
             data_day['temp_rt_corrected'] = data_day['temp_norm']-data_day['RT_norm']
             data_day = data_day.drop(['ID','timeStamp','day'],axis=1)
+            data_day = data_day.sort_values(by='hour').reset_index(drop=True)
             data_day.to_csv(where_to_save.as_posix(),sep=';')
         else:
             data_day = pd.read_csv(where_to_save.as_posix(),sep=';',index_col=0)
+            #data_day = data_day.sort_values(by='hour').reset_index(drop=True)
 
         return data_day
 
