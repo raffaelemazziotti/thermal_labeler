@@ -63,7 +63,8 @@ class Subjects():
     def __len__(self):
         return len(self.subjects)
 
-    def get_data_min(self, idx):
+    def get_data(self, idx):
+        # data with minute resolution
         where_to_save = self.pth/'data_minute'
         where_to_save.mkdir(parents=True,exist_ok=True)
         where_to_save = where_to_save/(self.subjects.loc[idx,'id'] + '.minute')
@@ -71,78 +72,67 @@ class Subjects():
         if not( where_to_save.is_file() ):
             data = list()
             for i,rec in enumerate(self.subjects.loc[idx,'rec_path']):
-                #df = dd.read_csv(rec,sep=';', skiprows=1,dtype={'isDay': 'float64'}, parse_dates=['Date'])
                 df = pd.read_csv(rec,sep=';', parse_dates=['Date'], skiprows=1 )
-                df['temp_med_delta'] = (df['temp_med']-df['temp_med'].mean())
-                df['distance'] = self.euclid(df)
-                df['RT_delta'] = df['RT']-df['RT'].mean()
                 data.append(df)
 
-            # concatenate recording and sort days
-            data = dd.concat(data)
+            # concatenate recording
+            data = pd.concat(data)
+            data = data.groupby('Date',sort=False).mean()
+            idx = pd.date_range(data.index[0].floor('H'), data.index[-1].ceil('H'), freq='1S')
+            data = data.reindex(idx, fill_value=np.nan).reset_index().rename(columns={'index':'Date'})
+            data['isDay'] = data['isDay'].fillna(method='ffill')
+            data['hour'] = data['Date'].dt.hour
+            data['minute'] = (data['Date'].dt.hour*60) + data['Date'].dt.minute
+            data[['RT','temp_avg', 'temp_med', 'temp_max', 'centroid_x', 'centroid_y']] = data[['RT','temp_avg', 'temp_med', 'temp_max', 'centroid_x', 'centroid_y']].interpolate()
+            data['distance'] = self.euclid(data).fillna(0)
+
             data['start_date'] = data['Date'].min()
             data['day'] = (data['Date'] - data['start_date']).dt.days + 1
 
             # recording in minutes
-            data_min = data.groupby(['minute','day']).mean().compute()
+            data_min = data.groupby(['minute','day'], sort=False).mean()
             data_min['temp_rt_diff'] = data_min['temp_avg']-data_min['RT']
-            #data_min['temp_rt_delta'] = data_min['temp_rt_delta'] - data_min['temp_rt_delta'].mean()
             data_min['temp_norm'] = data_min['temp_avg']-data_min['temp_avg'].mean()
             data_min['RT_norm'] = data_min['RT']-data_min['RT'].mean()
             data_min['temp_rt_corrected'] = data_min['temp_norm']-data_min['RT_norm']
+            data_min['temp_rt_corrected'][data_min['temp_rt_corrected'].diff().abs()>0.7]=np.nan
+            data_min['temp_rt_corrected'] = data_min['temp_rt_corrected'].interpolate()
             data_min = data_min.drop(['ID','timeStamp'],axis=1).reset_index()
-            data_min = data_min.sort_values(by='minute').reset_index(drop=True)
             data_min.to_csv(where_to_save.as_posix(),sep=';')
         else:
             data_min = pd.read_csv(where_to_save.as_posix(),sep=';',index_col=0)
-            #data_min = data_min.sort_values(by='minute').reset_index(drop=True)
 
         return data_min
 
-    def get_day_avg(self, idx):
+    def get_day_avg(self, idx, sort=False):
+        # data with minute resolution (24h [1440 mins] average)
         where_to_save = self.pth/'data_day'
         where_to_save.mkdir(parents=True,exist_ok=True)
         where_to_save = where_to_save/(self.subjects.loc[idx,'id']+'.day')
 
         if not( where_to_save.is_file() ):
-            data = list()
-            for i,rec in enumerate(self.subjects.loc[idx,'rec_path']):
 
-                #if not(where_to_save.is_file()):
-                df = dd.read_csv(rec,sep=';', skiprows=1,dtype={'isDay': 'float64'}, parse_dates=['Date'])
-                df['temp_med_delta'] = (df['temp_med']-df['temp_med'].mean())
-                df['distance'] = self.euclid(df)
-                df['RT_delta'] = df['RT']-df['RT'].mean()
-                data.append(df)
-
-            # concatenate recording and sort days
-            data = dd.concat(data)
-            data['start_date'] = data['Date'].min()
-            data['day'] = (data['Date'] - data['start_date']).dt.days + 1
-
+            data = self.get_data(idx)
             # average day
-            data_day = data.groupby(['minute']).mean().compute()
-            data_day['temp_rt_diff'] = data_day['temp_avg']-data_day['RT']
-            #data_day['temp_rt_delta'] = data_day['temp_rt_delta'] - data_day['temp_rt_delta'].mean()
-            data_day['temp_norm'] = data_day['temp_avg']-data_day['temp_avg'].mean()
-            data_day['RT_norm'] = data_day['RT']-data_day['RT'].mean()
-            data_day['temp_rt_corrected'] = data_day['temp_norm']-data_day['RT_norm']
-            data_day = data_day.drop(['ID','timeStamp','day'],axis=1)
-            data_day = data_day.sort_values(by='hour').reset_index(drop=True)
+            data_day = data.groupby(['minute']).mean()
+            data_day = data_day.drop(['day'],axis=1)
+            if sort:
+                data_day = data_day.sort_values(by='minute').reset_index(drop=True)
             data_day.to_csv(where_to_save.as_posix(),sep=';')
         else:
             data_day = pd.read_csv(where_to_save.as_posix(),sep=';',index_col=0)
-            #data_day = data_day.sort_values(by='hour').reset_index(drop=True)
+            if sort:
+                data_day = data_day.sort_values(by='minute').reset_index(drop=True)
 
         return data_day
 
-    def iter_data_day(self):
+    def iter_day_avg(self):
         for i in self.subjects.index:
             yield self.subjects.loc[i], self.get_day_avg(i)
 
-    def iter_data_min(self):
+    def iter_data(self):
         for i in self.subjects.index:
-            yield self.subjects.loc[i], self.get_data_min(i)
+            yield self.subjects.loc[i], self.get_data(i)
 
 
 class Cosinor:
