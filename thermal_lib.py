@@ -126,22 +126,26 @@ class Subjects():
 
         return data_day
 
-    def iter_day_avg(self):
-        for i in self.subjects.index:
-            yield self.subjects.loc[i], self.get_day_avg(i)
-
     def iter_data(self):
         for i in self.subjects.index:
             yield self.subjects.loc[i], self.get_data(i)
+    def iter_day_avg(self):
+        for i in self.subjects.index:
+            yield self.subjects.loc[i], self.get_day_avg(i)
 
 
 class Cosinor:
 
 
-    def __init__(self, input_recording, fs=60, isDay=None):
+    def __init__(self, input_recording, timeHours= None, fs=60, isDay=None):
         self.signal = input_recording
         self.fs = fs
-        self.time=np.linspace(0,1,len(self.signal)) * (len(self.signal)/self.fs)
+
+        if timeHours is None:
+            self.time = np.linspace(0,1,len(self.signal)) * (len(self.signal)/self.fs)
+        else:
+            self.time = timeHours
+
         self.power_spectrum, self.period, self.peaks_signi = self.periodogram(self.signal,self.fs)
         # fit params
         self.fit24()
