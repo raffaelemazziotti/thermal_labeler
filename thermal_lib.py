@@ -63,7 +63,7 @@ class Subjects():
     def __len__(self):
         return len(self.subjects)
 
-    def get_data(self, idx):
+    def get_data(self, idx, thr=0.7):
         # data with minute resolution
         where_to_save = self.pth/'data_minute'
         where_to_save.mkdir(parents=True,exist_ok=True)
@@ -95,7 +95,7 @@ class Subjects():
             data_min['temp_norm'] = data_min['temp_avg']-data_min['temp_avg'].mean()
             data_min['RT_norm'] = data_min['RT']-data_min['RT'].mean()
             data_min['temp_rt_corrected'] = data_min['temp_norm']-data_min['RT_norm']
-            data_min['temp_rt_corrected'][data_min['temp_rt_corrected'].diff().abs()>0.7]=np.nan
+            data_min.loc[data_min['temp_rt_corrected'].diff().abs()>thr, 'temp_rt_corrected']=np.nan
             data_min['temp_rt_corrected'] = data_min['temp_rt_corrected'].interpolate()
             data_min = data_min.drop(['ID','timeStamp'],axis=1).reset_index()
             data_min.to_csv(where_to_save.as_posix(),sep=';')
@@ -114,13 +114,12 @@ class Subjects():
 
             data = self.get_data(idx)
             # average day
-            data_day = data.groupby(['minute']).mean()
-            data_day = data_day.drop(['day'],axis=1)
+            data_day = data.groupby(['minute'],sort=False).mean().drop('day', axis=1).reset_index()
             if sort:
                 data_day = data_day.sort_values(by='minute').reset_index(drop=True)
             data_day.to_csv(where_to_save.as_posix(),sep=';')
         else:
-            data_day = pd.read_csv(where_to_save.as_posix(),sep=';',index_col=0)
+            data_day = pd.read_csv(where_to_save.as_posix(), sep=';', index_col=0)
             if sort:
                 data_day = data_day.sort_values(by='minute').reset_index(drop=True)
 
