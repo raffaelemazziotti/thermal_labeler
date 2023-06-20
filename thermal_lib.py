@@ -65,6 +65,7 @@ class Subjects():
 
     def get_data(self, idx, thr=0.7):
         # data with minute resolution
+        # thr = threshold for cleaning the signal from artifacts
         where_to_save = self.pth/'data_minute'
         where_to_save.mkdir(parents=True,exist_ok=True)
         where_to_save = where_to_save/(self.subjects.loc[idx,'id'] + '.minute')
@@ -104,7 +105,7 @@ class Subjects():
 
         return data_min
 
-    def get_day_avg(self, idx, sort=False):
+    def get_day_avg(self, idx, sort=False, thr=0.7):
         # data with minute resolution (24h [1440 mins] average)
         where_to_save = self.pth/'data_day'
         where_to_save.mkdir(parents=True,exist_ok=True)
@@ -112,7 +113,7 @@ class Subjects():
 
         if not( where_to_save.is_file() ):
 
-            data = self.get_data(idx)
+            data = self.get_data(idx,thr=thr)
             # average day
             data_day = data.groupby(['minute'],sort=False).mean().drop('day', axis=1).reset_index()
             if sort:
@@ -125,12 +126,26 @@ class Subjects():
 
         return data_day
 
+    def get_single_day(self, idx, day=1, thr=0.7):
+        data_min = self.get_data(idx,thr=thr)
+        i = 1440 * day
+        single_day = data_min.loc[0+i:i+1439]
+        return single_day
+
+    def number_of_days(self,idx):
+        data_min = self.get_data(idx)
+        return data_min.day.max()-1
+
     def iter_data(self):
         for i in self.subjects.index:
             yield self.subjects.loc[i], self.get_data(i)
     def iter_day_avg(self):
         for i in self.subjects.index:
             yield self.subjects.loc[i], self.get_day_avg(i)
+
+    def iter_single_days(self,idx):
+        for d in self.number_of_days(idx):
+            yield self.get_single_day(idx,d)
 
 
 class Cosinor:
