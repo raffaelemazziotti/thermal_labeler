@@ -6,6 +6,8 @@ import pandas as pd
 import dask.dataframe as dd
 from pathlib import Path
 import os
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
 
 hour2radians = lambda x: ((x%24)/24)*2*np.pi
 radians2hour = lambda x: ((x%(2*np.pi))/(2*np.pi))*24
@@ -147,6 +149,50 @@ class Subjects():
         for d in range(self.number_of_days(idx) ):
             yield d,self.get_single_day(idx,d)
 
+class Periodogram:
+
+    def __init__(self, signal_input, fs=60, alpha=0.55):
+        frequencies, power_spectrum = signal.periodogram(signal_input, fs)
+        self.power_spectrum =  np.insert(np.flip(power_spectrum[1:]),0,power_spectrum[0])
+        self.period =  np.insert(np.flip(1 / frequencies[1:]),0,0)
+
+        poi = np.where((self.period>=1) & (self.period<=72) )[0]
+        self.period = self.period[poi]
+        self.power_spectrum = self.power_spectrum[poi]
+
+        self.interp_func = interp1d(self.period, self.power_spectrum, kind='linear')
+
+        significant_indices, _ = fdrcorrection( 1 - self.power_spectrum )
+
+        peaks = self.period[significant_indices]
+        psd = self.power_spectrum[significant_indices]
+        amplitudes = np.sqrt(self.power_spectrum[significant_indices])
+        self.peaks_signi = pd.DataFrame({'period': peaks,'period_r': np.round(peaks), 'psd': psd ,'amplitude': amplitudes})
+        self.peaks_signi = self.peaks_signi.sort_values('amplitude',ascending=False).reset_index(drop=True)
+
+    def get_psd(self, freq):
+        return np.mean(self.interp_func(freq))
+
+    def plot(self, ax=None, signi=True):
+
+        if ax is None:
+            plot_labels=True
+            fig, ax = plt.subplots(figsize=(6,4))
+        else:
+            plot_labels=False
+
+        ax.bar( self.period, self.power_spectrum) #, basefmt = 'b',linefmt = 'b--', markerfmt=" " )
+
+        if signi:
+            star_pos = self.peaks_signi['psd'].max() *0.05
+            for i,row in self.peaks_signi.iterrows():
+                ax.plot(row['period'],row['psd']+star_pos,'r*') #,markerfacecolor='None')
+
+        if plot_labels:
+            ax.set_xlabel('Period [Hours]')
+            ax.set_ylabel('PSD')
+
+        return ax
 
 class Cosinor:
 
