@@ -126,7 +126,7 @@ class Subjects():
 
         return data_day
 
-    def get_single_day(self, idx, day=1, thr=0.7):
+    def get_single_day(self, idx, day=0, thr=0.7):
         data_min = self.get_data(idx,thr=thr)
         i = 1440 * day
         single_day = data_min.loc[0+i:i+1439]
@@ -144,8 +144,8 @@ class Subjects():
             yield self.subjects.loc[i], self.get_day_avg(i)
 
     def iter_single_days(self,idx):
-        for d in self.number_of_days(idx):
-            yield self.get_single_day(idx,d)
+        for d in range(self.number_of_days(idx) ):
+            yield d,self.get_single_day(idx,d)
 
 
 class Cosinor:
