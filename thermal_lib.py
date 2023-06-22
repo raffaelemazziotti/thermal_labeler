@@ -1,4 +1,4 @@
-from scipy import signal, fft
+from scipy import signal
 from statsmodels.stats.multitest import fdrcorrection
 from scipy.optimize import curve_fit
 import numpy as np
@@ -159,7 +159,6 @@ class Periodogram:
         poi = np.where((self.period>=1) & (self.period<=72) )[0]
         self.period = self.period[poi]
         self.power_spectrum = self.power_spectrum[poi]
-
         self.interp_func = interp1d(self.period, self.power_spectrum, kind='linear')
 
         significant_indices, _ = fdrcorrection( 1 - self.power_spectrum )
@@ -170,10 +169,10 @@ class Periodogram:
         self.peaks_signi = pd.DataFrame({'period': peaks,'period_r': np.round(peaks), 'psd': psd ,'amplitude': amplitudes})
         self.peaks_signi = self.peaks_signi.sort_values('amplitude',ascending=False).reset_index(drop=True)
 
-    def get_psd(self, freq):
-        return np.mean(self.interp_func(freq))
+    def get_psd(self, periods):
+        return np.mean(self.interp_func(periods))
 
-    def plot(self, ax=None, signi=True):
+    def plot(self, ax=None, signi=True, to_amp=False):
 
         if ax is None:
             plot_labels=True
@@ -181,23 +180,37 @@ class Periodogram:
         else:
             plot_labels=False
 
-        ax.bar( self.period, self.power_spectrum) #, basefmt = 'b',linefmt = 'b--', markerfmt=" " )
+        if to_amp:
+            y = np.sqrt(self.power_spectrum)
+        else:
+            y = self.power_spectrum
+        ax.bar( self.period, y)
 
         if signi:
-            star_pos = self.peaks_signi['psd'].max() *0.05
+            if to_amp:
+                star_pos = np.sqrt( self.peaks_signi['psd'].max() ) * 0.05
+            else:
+                star_pos = self.peaks_signi['psd'].max() *0.05
+
             for i,row in self.peaks_signi.iterrows():
-                ax.plot(row['period'],row['psd']+star_pos,'r*') #,markerfacecolor='None')
+                if to_amp:
+                    y = row['amplitude']
+                else:
+                    y = row['psd']
+                ax.plot(row['period'],y+star_pos,'r*')
 
         if plot_labels:
             ax.set_xlabel('Period [Hours]')
-            ax.set_ylabel('PSD')
+            if to_amp:
+                ax.set_ylabel('Magnitude')
+            else:
+                ax.set_ylabel('PSD')
 
         return ax
 
 class Cosinor:
 
-
-    def __init__(self, input_recording, timeHours= None, fs=60, isDay=None):
+    def __init__(self, input_recording, timeHours= None, fs=60):
         self.signal = input_recording
         self.fs = fs
 
@@ -206,49 +219,47 @@ class Cosinor:
         else:
             self.time = timeHours
 
-        self.power_spectrum, self.period, self.peaks_signi = self.periodogram(self.signal,self.fs)
-        # fit params
         self.fit24()
 
-    def fitComponents(self):
+    def fitComponents(self, components):
         estim_mesor = np.mean(self.signal)
         estim_acrophase = self.time[np.argmax(self.signal)]
         self.p0 = [estim_mesor]
 
         self.bounds = [[-np.inf],[np.inf]]
-        for i,comp in self.peaks_signi.iterrows():
-            self.p0.append( comp['amplitude'])
+        for comp in components:
+            self.p0.append( self.component_amp(self.signal, comp, self.fs) )
             self.bounds[0].append(0)
-            self.bounds[1].append(np.inf)
-            self.p0.append( comp['period'])
+            self.bounds[1].append( np.inf )
+            self.p0.append( comp )
             self.bounds[0].append(0)
             self.bounds[1].append(200)
             self.p0.append( estim_acrophase )
             self.bounds[0].append(0)
-            self.bounds[1].append( np.inf) #self.time[-1])
+            self.bounds[1].append( np.inf )
 
         self.params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=self.p0, bounds=self.bounds)
 
         self.mesor = self.params[0]
 
-        self.compontents = dict()
+        self.components = dict()
 
         inc = 1
-        for c in range(0,len(self.peaks_signi)):
+        for c in range(0,len(components)):
             if inc==1:
-                self.compontents['amplitude'] = [self.params[inc]]
-                self.compontents['period'] = [self.params[inc+1]]
-                self.compontents['period_r'] = [np.round(self.params[inc+1])]
-                self.compontents['acrophase'] = [np.round( self.params[inc+2] % self.params[inc+1], 3 )]
+                self.components['amplitude'] = [self.params[inc]]
+                self.components['period'] = [self.params[inc+1]]
+                self.components['period_r'] = [np.round(self.params[inc+1])]
+                self.components['acrophase'] = [np.round( self.params[inc+2] % self.params[inc+1], 3 )]
             else:
-                self.compontents['amplitude'].append( self.params[inc] )
-                self.compontents['period'].append( self.params[inc+1] )
-                self.compontents['period_r'].append( np.round(self.params[inc+1]) )
-                self.compontents['acrophase'].append( np.round( self.params[inc+2] % self.params[inc+1], 3 ) )
+                self.components['amplitude'].append( self.params[inc] )
+                self.components['period'].append( self.params[inc+1] )
+                self.components['period_r'].append( np.round(self.params[inc+1]) )
+                self.components['acrophase'].append( np.round( self.params[inc+2] % self.params[inc+1], 3 ) )
             inc=inc+3
 
-        self.compontents = pd.DataFrame(self.compontents)[['period','period_r','amplitude','acrophase']]
-        self.compontents = self.compontents.sort_values('amplitude',ascending=False).reset_index(drop=True)
+        self.components = pd.DataFrame(self.components)[['period','period_r','amplitude','acrophase']]
+        self.components = self.components.sort_values('amplitude',ascending=False).reset_index(drop=True)
         self.curve = self.multicomponent_cosinor(self.time, *self.params)
 
     def fit24(self):
@@ -260,21 +271,20 @@ class Cosinor:
         self.bounds = [[-np.inf,0,0,0], [np.inf,np.inf,200,np.inf]]
 
         self.params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=self.p0, bounds=self.bounds)
-        self.compontents = dict()
-        self.compontents['mesor'] = self.params[0]
-        self.compontents['amplitude'] = [self.params[1]]
-        self.compontents['period'] = [self.params[2]]
-        self.compontents['acrophase'] = [np.round( self.params[3] % 24, 3 )]
+        self.components = dict()
+        self.components['mesor'] = self.params[0]
+        self.components['amplitude'] = [self.params[1]]
+        self.components['period'] = [self.params[2]]
+        self.components['acrophase'] = [np.round( self.params[3] % 24, 3 )]
 
-        self.compontents = pd.DataFrame(self.compontents)
+        self.components = pd.DataFrame(self.components)
         self.curve = self.multicomponent_cosinor(self.time, *self.params)
 
     def fitComponent(self,component=24):
         estim_mesor = np.mean(self.signal)
         estim_acrophase = self.time[np.argmax(self.signal)]
-        estim_amplitude = np.max(self.signal)-np.min(self.signal)
+        estim_amplitude = self.component_amp(self.signal, component, self.fs) #np.max(self.signal)-np.min(self.signal)
         p0 = [estim_mesor,estim_amplitude,component,estim_acrophase]
-        print('p0', p0)
         bounds = [[-np.inf,0,0,0], [np.inf,np.inf,200, self.time[-1]*2]]
         params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=p0, bounds=bounds)
         component = dict()
@@ -283,7 +293,7 @@ class Cosinor:
         component['period'] = [params[2]]
         component['acrophase'] = [np.round( params[3] % 24, 3 )]
 
-        component = pd.DataFrame(component)[['period','amplitude','acrophase']]
+        component = pd.DataFrame(component)[['mesor','period','amplitude','acrophase']]
         curve = self.multicomponent_cosinor(self.time, *params)
 
         return component,curve,self.time
@@ -302,18 +312,8 @@ class Cosinor:
         return result
 
     @staticmethod
-    def periodogram(x,fs=60):
-        frequencies, power_spectrum = signal.periodogram(x, fs)
-        frequencies = frequencies
-        power_spectrum =  np.insert(np.flip(power_spectrum[1:]),0,power_spectrum[0])
-        period =  np.insert(np.flip(1 / frequencies[1:]),0,0)
-
-        p_values = 1 - power_spectrum  # Convert power values to p-values
-        rejected, _ = fdrcorrection(p_values)
-
-        peaks = period[rejected]
-        psd = power_spectrum[rejected]
-        amplitudes = np.sqrt(power_spectrum[rejected])
-        peaks_signi = pd.DataFrame({'period': peaks,'period_r': np.round(peaks), 'psd': psd ,'amplitude': amplitudes})
-        peaks_signi = peaks_signi.sort_values('amplitude',ascending=False).reset_index(drop=True)
-        return power_spectrum, period, peaks_signi
+    def component_amp(input_signal, target_period, sampling_frequency):
+        frequencies, psd = signal.periodogram(input_signal, fs=sampling_frequency)
+        interpolation_func = interp1d(frequencies, psd, kind='linear')
+        psd = interpolation_func(1/target_period)
+        return np.sqrt( psd  )
