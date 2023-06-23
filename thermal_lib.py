@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
+from scipy.stats import ttest_1samp
 
 hour2radians = lambda x: ((x%24)/24)*2*np.pi
 radians2hour = lambda x: ((x%(2*np.pi))/(2*np.pi))*24
@@ -574,8 +575,6 @@ class Cosinor:
        return np.sqrt( psd  )
 
 
-from scipy.stats import ttest_1samp
-
 class CrossCorrelation:
 
     def __init__(self, signal1, signal2, max_latency, resample=100):
@@ -645,21 +644,39 @@ class CrossCorrelation:
 
         return cross_correlation, latencies
 
-    def plot(self):
+    def plot(self, ax=None, show_perm=True, show_peak=True, line_color='b',line_style='-'):
         """
             Plot the cross-correlation curve.
 
             Parameters:
-                None
+                ax (matplotlib.axes.Axes, optional): The axes to plot on. If not provided, a new figure and axes will be created.
+                show_perm (bool, optional): Whether to show the permuted cross-correlation curve. Default is True.
+                show_peak (bool, optional): Whether to show the peak of the cross-correlation curve. Default is True.
+                line_color (str, optional): The color of the cross-correlation curve. Default is 'b'.
+                line_style (str, optional): The line style of the cross-correlation curve. Default is '-'.
 
             Returns:
                 None
         """
-        fig,ax = plt.subplots()
-        ax.plot(self.latencies ,self.cross_correlation)
-        ax.plot(self.latencies ,self.per_xcorr_avg)
-        ax.axvline(0,color='k')
-        ax.plot(self.summary['latency_minute'],self.summary['amplitude'],'sr')
-        
+
+        if ax is None:
+            plot_labels=True
+            fig, ax = plt.subplots(figsize=(4,4))
+        else:
+            plot_labels=False
+        ax.axvline(0,color='k',linestyle='--')
+
+        ax.plot(self.latencies, self.cross_correlation,line_color+line_style, label="real")
+        if show_perm:
+            ax.plot(self.latencies, self.per_xcorr_avg,'gray', label="perm")
+
+        if show_peak:
+            ax.plot(self.summary['latency_minute'], self.summary['amplitude'],'sr')
+
+        if plot_labels:
+            ax.set_ylabel('Cross-correlation')
+            ax.set_xlabel('Time Lag [minutes]')
+            plt.legend(loc="best")
 
 
+        return ax
