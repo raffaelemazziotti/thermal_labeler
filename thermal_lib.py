@@ -298,6 +298,8 @@ class Subjects():
            for d in range(self.number_of_days(idx) ):
                yield d,self.get_single_day(idx,d)
            """
+        for d in range(self.number_of_days(idx) ):
+            yield d,self.get_single_day(idx,d)
 
 class Periodogram:
 
@@ -570,3 +572,94 @@ class Cosinor:
        interpolation_func = interp1d(frequencies, psd, kind='linear')
        psd = interpolation_func(1/target_period)
        return np.sqrt( psd  )
+
+
+from scipy.stats import ttest_1samp
+
+class CrossCorrelation:
+
+    def __init__(self, signal1, signal2, max_latency, resample=100):
+
+        """
+        Initialize a CrossCorrelation object.
+
+        Parameters:
+            signal1 (array-like): The first input signal.
+            signal2 (array-like): The second input signal.
+            max_latency (int): The maximum latency in minutes.
+            resample (int, optional): The number of resamples for calculating the average cross-correlation. Default is 100.
+
+        Returns:
+            None
+
+        # positive latency means that signal1 is lagging
+        # negative latency means that signal1 is leading
+        """
+
+        self.signal1 = signal1
+        self.signal2 = signal2
+        self.cross_correlation, self.latencies = self.xcorr(self.signal1, self.signal2, max_latency)
+        self.correlation_coeff = np.corrcoef(self.signal1, self.signal2)[0,1]
+
+        if resample:
+            per_xcrorr = np.zeros(( resample, len(self.cross_correlation) ) )
+            for i in range(0,resample):
+                per_sig = np.random.permutation(self.signal2)
+                per_xcrorr[i], _ = self.xcorr( self.signal1, per_sig, max_latency)
+        self.per_xcorr_avg = np.mean(per_xcrorr,axis=0)
+
+
+        peak_pos = np.argmax(self.cross_correlation)
+        peak_max = self.cross_correlation[peak_pos]
+        peak_lat = self.latencies[peak_pos]
+        if peak_lat>0:
+            peak_sig1_is = 'lag'
+        elif peak_lat<0:
+            peak_sig1_is = 'lead'
+        else:
+            peak_sig1_is = 'equal'
+
+        distr = per_xcrorr[:, peak_pos]
+        t_statistic, p_val = ttest_1samp(distr,peak_max)
+        self.summary = pd.DataFrame([[self.correlation_coeff,peak_pos,peak_max,peak_lat,peak_sig1_is,p_val]],columns=['corr_coeff','latency_sample','amplitude','latency_minute','signal_1_is','p-val'],index=[0])
+
+    @staticmethod
+    def xcorr(sig1,sig2,lat_max):
+        """
+        Calculate the cross-correlation between two signals.
+
+        Parameters:
+            sig1 (array-like): The first input signal.
+            sig2 (array-like): The second input signal.
+            lat_max (int): The maximum latency.
+
+        Returns:
+            tuple: A tuple containing the cross-correlation array and the latency array.
+        """
+        cross_correlation = np.zeros(2 * lat_max + 1)
+        latencies = np.arange(-lat_max, lat_max + 1)
+
+        for index, latency in enumerate(latencies):
+            shifted_signal = np.roll(sig2, latency)
+            cross_correlation[index] = np.correlate(sig1, shifted_signal, mode='valid') / (np.linalg.norm(sig1) * np.linalg.norm(shifted_signal))
+
+        return cross_correlation, latencies
+
+    def plot(self):
+        """
+            Plot the cross-correlation curve.
+
+            Parameters:
+                None
+
+            Returns:
+                None
+        """
+        fig,ax = plt.subplots()
+        ax.plot(self.latencies ,self.cross_correlation)
+        ax.plot(self.latencies ,self.per_xcorr_avg)
+        ax.axvline(0,color='k')
+        ax.plot(self.summary['latency_minute'],self.summary['amplitude'],'sr')
+        
+
+
