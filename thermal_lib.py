@@ -302,6 +302,24 @@ class Subjects():
         for d in range(self.number_of_days(idx) ):
             yield d,self.get_single_day(idx,d)
 
+    def get_days_df(self,idx, what='temp_rt_corrected'):
+        """
+        Retrieve a DataFrame containing data for each individual day.
+
+        Parameters:
+            idx (int): Index of the day to retrieve data for.
+            what (str, optional): Name of the column to include in the DataFrame. Default is 'temp_rt_corrected'.
+
+        Returns:
+            each_day (pd.DataFrame): DataFrame containing data for each individual day.
+        """
+
+        each_day = dict()
+        for d,day in self.iter_single_days(idx):
+            each_day[d] = day[what].reset_index(drop=True)
+        each_day = pd.DataFrame.from_dict(each_day)
+        return each_day
+
 class Periodogram:
 
    def __init__(self, signal_input, fs=60):
@@ -428,7 +446,7 @@ class Cosinor:
 
        self.fit24()
 
-   def fitComponents(self, components):
+   def fitComponents(self, input_components, fixed=True):
        """
         Fit multiple components to the input signal.
 
@@ -440,72 +458,82 @@ class Cosinor:
         """
        estim_mesor = np.mean(self.signal)
        estim_acrophase = self.time[np.argmax(self.signal)]
-       self.p0 = [estim_mesor]
+       p0 = [estim_mesor]
 
-       self.bounds = [[-np.inf],[np.inf]]
-       for comp in components:
-           self.p0.append( self.component_amp(self.signal, comp, self.fs) )
-           self.bounds[0].append(0)
-           self.bounds[1].append( np.inf )
-           self.p0.append( comp )
-           self.bounds[0].append(0)
-           self.bounds[1].append(200)
-           self.p0.append( estim_acrophase )
-           self.bounds[0].append(0)
-           self.bounds[1].append( np.inf )
+       bounds = [[-np.inf],[np.inf]]
+       for comp in input_components:
+           p0.append( self.component_amp(self.signal, comp, self.fs) )
+           bounds[0].append(0)
+           bounds[1].append( np.inf )
+           p0.append( comp )
+           if fixed:
+               bounds[0].append(comp-0.01)
+               bounds[1].append(comp+0.01)
+           else:
+               bounds[0].append(0)
+               bounds[1].append(200)
+           p0.append( estim_acrophase )
+           bounds[0].append(0)
+           bounds[1].append( np.inf )
 
-       self.params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=self.p0, bounds=self.bounds)
+       params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=p0, bounds=bounds)
 
-       self.mesor = self.params[0]
+       mesor = params[0]
 
-       self.components = dict()
+       components = dict()
 
        inc = 1
-       for c in range(0,len(components)):
+       for c in range(0,len(input_components)):
            if inc==1:
-               self.components['amplitude'] = [self.params[inc]]
-               self.components['period'] = [self.params[inc+1]]
-               self.components['period_r'] = [np.round(self.params[inc+1])]
-               self.components['acrophase'] = [np.round( self.params[inc+2] % self.params[inc+1], 3 )]
+               components['amplitude'] = [params[inc]]
+               components['period'] = [params[inc+1]]
+               components['period_r'] = [np.round(params[inc+1])]
+               components['acrophase'] = [np.round( params[inc+2] % params[inc+1], 3 )]
            else:
-               self.components['amplitude'].append( self.params[inc] )
-               self.components['period'].append( self.params[inc+1] )
-               self.components['period_r'].append( np.round(self.params[inc+1]) )
-               self.components['acrophase'].append( np.round( self.params[inc+2] % self.params[inc+1], 3 ) )
+               components['amplitude'].append( params[inc] )
+               components['period'].append( params[inc+1] )
+               components['period_r'].append( np.round(params[inc+1]) )
+               components['acrophase'].append( np.round( params[inc+2] % params[inc+1], 3 ) )
            inc=inc+3
 
-       self.components = pd.DataFrame(self.components)[['period','period_r','amplitude','acrophase']]
-       self.components = self.components.sort_values('amplitude',ascending=False).reset_index(drop=True)
-       self.curve = self.multicomponent_cosinor(self.time, *self.params)
+       print(components)
+       components = pd.DataFrame(components)[['period','period_r','amplitude','acrophase']]
+       components = components.sort_values('amplitude',ascending=False).reset_index(drop=True)
+       curve = self.multicomponent_cosinor(self.time, *params)
 
-   def fit24(self):
-       """
+       return mesor, components, curve, self.time
+
+   def fit24(self, fixed=False):
+        """
         Fit a 24-hour component to the input signal.
 
         Parameters:
-            None
+            fixed (bool, optional): Whether to fix the period to 24 hours. If True, the period will be fixed, otherwise it will be optimized. Default is False.
 
         Returns:
             None
         """
-       estim_mesor = np.mean(self.signal)
-       estim_amplitude = np.max(self.signal)-np.min(self.signal)
-       estim_acrophase = self.time[np.argmax(self.signal)]
-       self.p0 = [estim_mesor,estim_amplitude,24,estim_acrophase]
+        estim_mesor = np.mean(self.signal)
+        estim_amplitude = np.max(self.signal)-np.min(self.signal)
+        estim_acrophase = self.time[np.argmax(self.signal)]
+        self.p0 = [estim_mesor,estim_amplitude,24,estim_acrophase]
 
-       self.bounds = [[-np.inf,0,0,0], [np.inf,np.inf,200,np.inf]]
+        if fixed:
+            self.bounds = [[-np.inf,0,23.99,0], [np.inf,np.inf,24.01,np.inf]]
+        else:
+            self.bounds = [[-np.inf,0,0,0], [np.inf,np.inf,200,np.inf]]
 
-       self.params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=self.p0, bounds=self.bounds)
-       self.components = dict()
-       self.components['mesor'] = self.params[0]
-       self.components['amplitude'] = [self.params[1]]
-       self.components['period'] = [self.params[2]]
-       self.components['acrophase'] = [np.round( self.params[3] % 24, 3 )]
+        self.params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=self.p0, bounds=self.bounds)
+        self.components = dict()
+        self.components['mesor'] = self.params[0]
+        self.components['amplitude'] = [self.params[1]]
+        self.components['period'] = [self.params[2]]
+        self.components['acrophase'] = [np.round( self.params[3] % 24, 3 )]
 
-       self.components = pd.DataFrame(self.components)
-       self.curve = self.multicomponent_cosinor(self.time, *self.params)
+        self.components = pd.DataFrame(self.components)
+        self.curve = self.multicomponent_cosinor(self.time, *self.params)
 
-   def fitComponent(self,component=24):
+   def fitComponent(self,component=24, fixed=False):
        """
         Fit a specific component to the input signal.
 
@@ -519,7 +547,12 @@ class Cosinor:
        estim_acrophase = self.time[np.argmax(self.signal)]
        estim_amplitude = self.component_amp(self.signal, component, self.fs) #np.max(self.signal)-np.min(self.signal)
        p0 = [estim_mesor,estim_amplitude,component,estim_acrophase]
-       bounds = [[-np.inf,0,0,0], [np.inf,np.inf,200, self.time[-1]*2]]
+
+       if fixed:
+           bounds = [[-np.inf,0,component-0.01,0], [np.inf,np.inf,component+0.01, self.time[-1]*2]]
+       else:
+           bounds = [[-np.inf,0,0,0], [np.inf,np.inf,200, self.time[-1]*2]]
+
        params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=p0, bounds=bounds)
        component = dict()
        component['mesor'] = params[0]
