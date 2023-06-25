@@ -9,6 +9,7 @@ import os
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.stats import ttest_1samp
+from sklearn.metrics import r2_score
 
 hour2radians = lambda x: ((x%24)/24)*2*np.pi
 radians2hour = lambda x: ((x%(2*np.pi))/(2*np.pi))*24
@@ -103,20 +104,37 @@ class Subjects():
         """
         return len(self.subjects)
 
-    def get_data(self, idx, thr=0.7):
+    @staticmethod
+    def remove_outliers(signal, threshold_multiplier=2):
+        diff = np.diff(signal)  # Calculate the first differences of the signal
+        abs_diff = np.abs(diff)  # Take the absolute value of the differences
+        median = np.median(abs_diff)
+        mad = np.median(np.abs(abs_diff - median))
+        threshold = threshold_multiplier * mad
+
+        cleaned_signal = signal.copy()
+        outliers = abs_diff > threshold
+
+        # Replace outliers with NaN
+        cleaned_signal[1:][outliers] = np.nan
+
+        # Perform linear interpolation to fill in NaN values
+        cleaned_signal = pd.Series(cleaned_signal).interpolate().values
+
+        return cleaned_signal, threshold
+
+    def get_data(self, idx):
         """
         Retrieves data for a subject at the specified index.
 
         Parameters:
         - idx (int): Index of the subject.
-        - thr (float, optional): Threshold for cleaning the signal from artifacts.
 
         Returns:
         - pandas.DataFrame: Data for the specified subject, cleaned and processed.
         """
 
         # data with minute resolution
-        # thr = threshold for cleaning the signal from artifacts
         where_to_save = self.pth/'data_minute'
         where_to_save.mkdir(parents=True,exist_ok=True)
         where_to_save = where_to_save/(self.subjects.loc[idx,'id'] + '.minute')
@@ -143,11 +161,12 @@ class Subjects():
 
             # recording in minutes
             data_min = data.groupby(['minute','day'], sort=False).mean()
+            data_min['temp_avg'] = self.remove_outliers(data_min['temp_avg'])[0]
+            data_min['RT'] = self.remove_outliers(data_min['RT'])[0]
             data_min['temp_rt_diff'] = data_min['temp_avg']-data_min['RT']
             data_min['temp_norm'] = data_min['temp_avg']-data_min['temp_avg'].mean()
             data_min['RT_norm'] = data_min['RT']-data_min['RT'].mean()
             data_min['temp_rt_corrected'] = data_min['temp_norm']-data_min['RT_norm']
-            data_min.loc[data_min['temp_rt_corrected'].diff().abs()>thr, 'temp_rt_corrected']=np.nan
             data_min['temp_rt_corrected'] = data_min['temp_rt_corrected'].interpolate()
             data_min = data_min.drop(['ID','timeStamp'],axis=1).reset_index()
             data_min.to_csv(where_to_save.as_posix(),sep=';')
@@ -156,14 +175,13 @@ class Subjects():
 
         return data_min
 
-    def get_day_avg(self, idx, sort=False, thr=0.7):
+    def get_day_avg(self, idx, sort=False):
         """
         Retrieves the daily average data for a subject at the specified index.
 
         Parameters:
         - idx (int): Index of the subject.
         - sort (bool, optional): Whether to sort the data by minute.
-        - thr (float, optional): Threshold for cleaning the signal from artifacts.
 
         Returns:
         - pandas.DataFrame: Daily average data for the specified subject.
@@ -224,7 +242,7 @@ class Subjects():
 
         if not( where_to_save.is_file() ):
 
-            data = self.get_data(idx,thr=thr)
+            data = self.get_data(idx)
             # average day
             data_day = data.groupby(['minute'],sort=False).mean().drop('day', axis=1).reset_index()
             if sort:
@@ -237,19 +255,18 @@ class Subjects():
 
         return data_day
 
-    def get_single_day(self, idx, day=0, thr=0.7):
+    def get_single_day(self, idx, day=0):
         """
         Retrieves the data for a single day of a subject at the specified index.
 
         Parameters:
         - idx (int): Index of the subject.
         - day (int, optional): Index of the day (0-indexed).
-        - thr (float, optional): Threshold for cleaning the signal from artifacts.
 
         Returns:
         - pandas.DataFrame: Data for the specified day of the subject.
         """
-        data_min = self.get_data(idx,thr=thr)
+        data_min = self.get_data(idx)
         i = 1440 * day
         single_day = data_min.loc[0+i:i+1439]
         return single_day
@@ -322,194 +339,196 @@ class Subjects():
 
 class Periodogram:
 
-   def __init__(self, signal_input, fs=60):
-       """
-        Initialize the Periodogram object.
-
-        Args:
-            signal_input (array-like): Input signal for which the periodogram will be computed.
-            fs (float, optional): Sampling frequency of the input signal. Defaults to 60.
-
-            # EXAMPLES
-            time = np.linspace(0, 10, 1000)
-            frequency = 2  # Hz
-            amplitude = 1
-            signal_input = amplitude * np.sin(2 * np.pi * frequency * time)
-
-            # Create a Periodogram object
-            periodogram = Periodogram(signal_input, fs=100)  # Sampling frequency is 100 Hz
-
-            # Get the average power spectral density for specific periods
-            periods = [2, 4, 6]
-            average_psd = periodogram.get_psd(periods)
-            print("Average PSD:", average_psd)
-
-            # Plot the power spectrum with significant peaks
-            periodogram.plot(signi=True)
+    def __init__(self, signal_input, fs=60):
         """
+         Initialize the Periodogram object.
 
-       frequencies, power_spectrum = signal.periodogram(signal_input, fs)
-       self.power_spectrum =  np.insert(np.flip(power_spectrum[1:]),0,power_spectrum[0])
-       self.period =  np.insert(np.flip(1 / frequencies[1:]),0,0)
+         Args:
+             signal_input (array-like): Input signal for which the periodogram will be computed.
+             fs (float, optional): Sampling frequency of the input signal. Defaults to 60.
 
-       poi = np.where((self.period>=1) & (self.period<=72) )[0]
-       self.period = self.period[poi]
-       self.power_spectrum = self.power_spectrum[poi]
-       self.interp_func = interp1d(self.period, self.power_spectrum, kind='linear')
+             # EXAMPLES
+             time = np.linspace(0, 10, 1000)
+             frequency = 2  # Hz
+             amplitude = 1
+             signal_input = amplitude * np.sin(2 * np.pi * frequency * time)
 
-       significant_indices, _ = fdrcorrection( 1 - self.power_spectrum )
+             # Create a Periodogram object
+             periodogram = Periodogram(signal_input, fs=100)  # Sampling frequency is 100 Hz
 
-       peaks = self.period[significant_indices]
-       psd = self.power_spectrum[significant_indices]
-       amplitudes = np.sqrt(self.power_spectrum[significant_indices])
-       self.peaks_signi = pd.DataFrame({'period': peaks,'period_r': np.round(peaks), 'psd': psd ,'amplitude': amplitudes})
-       self.peaks_signi = self.peaks_signi.sort_values('amplitude',ascending=False).reset_index(drop=True)
+             # Get the average power spectral density for specific periods
+             periods = [2, 4, 6]
+             average_psd = periodogram.get_psd(periods)
+             print("Average PSD:", average_psd)
 
-   def get_psd(self, periods):
-       """
-        Get the average power spectral density (PSD) for the given periods.
+             # Plot the power spectrum with significant peaks
+             periodogram.plot(signi=True)
+         """
 
-        Args:
-            periods (array-like): Periods for which to compute the average PSD.
+        frequencies, power_spectrum = signal.periodogram(signal_input, fs)
+        self.power_spectrum =  np.insert(np.flip(power_spectrum[1:]),0,power_spectrum[0])
+        self.period =  np.insert(np.flip(1 / frequencies[1:]),0,0)
 
-        Returns:
-            float: Average PSD for the given periods.
+        poi = np.where((self.period>=1) & (self.period<=72) )[0]
+        self.period = self.period[poi]
+        self.power_spectrum = self.power_spectrum[poi]
+        self.interp_func = interp1d(self.period, self.power_spectrum, kind='linear')
+
+        significant_indices, _ = fdrcorrection( 1 - self.power_spectrum )
+
+        peaks = self.period[significant_indices]
+        psd = self.power_spectrum[significant_indices]
+        amplitudes = np.sqrt(self.power_spectrum[significant_indices])
+        self.peaks_signi = pd.DataFrame({'period': peaks,'period_r': np.round(peaks), 'psd': psd ,'amplitude': amplitudes})
+        self.peaks_signi = self.peaks_signi.sort_values('amplitude',ascending=False).reset_index(drop=True)
+
+    def get_psd(self, periods):
         """
-       return np.mean(self.interp_func(periods))
+         Get the average power spectral density (PSD) for the given periods.
 
-   def plot(self, ax=None, signi=True, to_amp=False):
-       """
-        Plot the power spectrum.
+         Args:
+             periods (array-like): Periods for which to compute the average PSD.
 
-        Args:
-            ax (matplotlib.axes.Axes, optional): Axes object for the plot. If not provided, a new figure and axes will be created. Defaults to None.
-            signi (bool, optional): Whether to show significant peaks. Defaults to True.
-            to_amp (bool, optional): Whether to plot the amplitude (square root of PSD) instead of PSD. Defaults to False.
+         Returns:
+             float: Average PSD for the given periods.
+         """
+        return np.mean(self.interp_func(periods))
 
-        Returns:
-            matplotlib.axes.Axes: Axes object containing the plot.
+    def plot(self, ax=None, signi=True, to_amp=False):
         """
+         Plot the power spectrum.
 
-       if ax is None:
-           plot_labels=True
-           fig, ax = plt.subplots(figsize=(6,4))
-       else:
-           plot_labels=False
+         Args:
+             ax (matplotlib.axes.Axes, optional): Axes object for the plot. If not provided, a new figure and axes will be created. Defaults to None.
+             signi (bool, optional): Whether to show significant peaks. Defaults to True.
+             to_amp (bool, optional): Whether to plot the amplitude (square root of PSD) instead of PSD. Defaults to False.
 
-       if to_amp:
-           y = np.sqrt(self.power_spectrum)
-       else:
-           y = self.power_spectrum
-       ax.bar( self.period, y)
+         Returns:
+             matplotlib.axes.Axes: Axes object containing the plot.
+         """
 
-       if signi:
-           if to_amp:
-               star_pos = np.sqrt( self.peaks_signi['psd'].max() ) * 0.05
-           else:
-               star_pos = self.peaks_signi['psd'].max() *0.05
+        if ax is None:
+            plot_labels=True
+            fig, ax = plt.subplots(figsize=(6,4))
+        else:
+            plot_labels=False
 
-           for i,row in self.peaks_signi.iterrows():
-               if to_amp:
-                   y = row['amplitude']
-               else:
-                   y = row['psd']
-               ax.plot(row['period'],y+star_pos,'r*')
+        if to_amp:
+            y = np.sqrt(self.power_spectrum)
+        else:
+            y = self.power_spectrum
+        ax.bar( self.period, y)
 
-       if plot_labels:
-           ax.set_xlabel('Period [Hours]')
-           if to_amp:
-               ax.set_ylabel('Magnitude')
-           else:
-               ax.set_ylabel('PSD')
+        if signi:
+            if to_amp:
+                star_pos = np.sqrt( self.peaks_signi['psd'].max() ) * 0.05
+            else:
+                star_pos = self.peaks_signi['psd'].max() *0.05
 
-       return ax
+            for i,row in self.peaks_signi.iterrows():
+                if to_amp:
+                    y = row['amplitude']
+                else:
+                    y = row['psd']
+                ax.plot(row['period'],y+star_pos,'r*')
+
+        if plot_labels:
+            ax.set_xlabel('Period [Hours]')
+            if to_amp:
+                ax.set_ylabel('Magnitude')
+            else:
+                ax.set_ylabel('PSD')
+
+        return ax
 
 class Cosinor:
 
-   def __init__(self, input_recording, timeHours= None, fs=60):
-       """
-        Initialize a Cosinor object.
-
-        Parameters:
-            input_recording (array-like): The input signal.
-            timeHours (array-like, optional): The time points corresponding to the input signal in hours. If not provided, the time points are calculated based on the signal length and the sampling frequency.
-            fs (int, optional): The sampling frequency in Hz. Default is 60.
-
+    def __init__(self, input_recording, timeHours= None, fs=60, fixed24=True, acroWrap=False):
         """
-       self.signal = input_recording
-       self.fs = fs
+         Initialize a Cosinor object.
 
-       if timeHours is None:
-           self.time = np.linspace(0,1,len(self.signal)) * (len(self.signal)/self.fs)
-       else:
-           self.time = timeHours
+         Parameters:
+             input_recording (array-like): The input signal.
+             timeHours (array-like, optional): The time points corresponding to the input signal in hours. If not provided, the time points are calculated based on the signal length and the sampling frequency.
+             fs (int, optional): The sampling frequency in Hz. Default is 60.
+             fixed24 (bool,optional): force 24h period
+             acroWrap (bool,optional): force acrophase to 0 24h
 
-       self.fit24()
+         """
+        self.signal = input_recording
+        self.fs = fs
 
-   def fitComponents(self, input_components, fixed=True):
-       """
-        Fit multiple components to the input signal.
+        if timeHours is None:
+            self.time = np.linspace(0,1,len(self.signal)) * (len(self.signal)/self.fs)
+        else:
+            self.time = timeHours
 
-        Parameters:
-            components (array-like): The periods of the components to fit.
+        self.fit24(fixed=fixed24, acroWrap=acroWrap)
 
-        Returns:
-            None
+    def fitComponents(self, input_components, fixed=True):
         """
-       estim_mesor = np.mean(self.signal)
-       estim_acrophase = self.time[np.argmax(self.signal)]
-       p0 = [estim_mesor]
+         Fit multiple components to the input signal.
 
-       bounds = [[-np.inf],[np.inf]]
-       for comp in input_components:
-           p0.append( self.component_amp(self.signal, comp, self.fs) )
-           bounds[0].append(0)
-           bounds[1].append( np.inf )
-           p0.append( comp )
-           if fixed:
-               bounds[0].append(comp-0.01)
-               bounds[1].append(comp+0.01)
-           else:
-               bounds[0].append(0)
-               bounds[1].append(200)
-           p0.append( estim_acrophase )
-           bounds[0].append(0)
-           bounds[1].append( np.inf )
+         Parameters:
+             components (array-like): The periods of the components to fit.
 
-       params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=p0, bounds=bounds)
+         Returns:
+             None
+         """
+        estim_mesor = np.mean(self.signal)
+        estim_acrophase = self.time[np.argmax(self.signal)]
+        p0 = [estim_mesor]
 
-       mesor = params[0]
+        bounds = [[-np.inf],[np.inf]]
+        for comp in input_components:
+            p0.append( self.component_amp(self.signal, comp, self.fs) )
+            bounds[0].append(0)
+            bounds[1].append( np.inf )
+            p0.append( comp )
+            if fixed:
+                bounds[0].append(comp-0.01)
+                bounds[1].append(comp+0.01)
+            else:
+                bounds[0].append(0)
+                bounds[1].append(200)
+            p0.append( estim_acrophase )
+            bounds[0].append(0)
+            bounds[1].append( np.inf )
 
-       components = dict()
+        params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=p0, bounds=bounds)
 
-       inc = 1
-       for c in range(0,len(input_components)):
-           if inc==1:
-               components['amplitude'] = [params[inc]]
-               components['period'] = [params[inc+1]]
-               components['period_r'] = [np.round(params[inc+1])]
-               components['acrophase'] = [np.round( params[inc+2] % params[inc+1], 3 )]
-           else:
-               components['amplitude'].append( params[inc] )
-               components['period'].append( params[inc+1] )
-               components['period_r'].append( np.round(params[inc+1]) )
-               components['acrophase'].append( np.round( params[inc+2] % params[inc+1], 3 ) )
-           inc=inc+3
+        mesor = params[0]
 
-       print(components)
-       components = pd.DataFrame(components)[['period','period_r','amplitude','acrophase']]
-       components = components.sort_values('amplitude',ascending=False).reset_index(drop=True)
-       curve = self.multicomponent_cosinor(self.time, *params)
+        components = dict()
 
-       return mesor, components, curve, self.time
+        inc = 1
+        for c in range(0,len(input_components)):
+            if inc==1:
+                components['amplitude'] = [params[inc]]
+                components['period'] = [params[inc+1]]
+                components['period_r'] = [np.round(params[inc+1])]
+                components['acrophase'] = [np.round( params[inc+2] % params[inc+1], 3 )]
+            else:
+                components['amplitude'].append( params[inc] )
+                components['period'].append( params[inc+1] )
+                components['period_r'].append( np.round(params[inc+1]) )
+                components['acrophase'].append( np.round( params[inc+2] % params[inc+1], 3 ) )
+            inc=inc+3
 
-   def fit24(self, fixed=False):
+        print(components)
+        components = pd.DataFrame(components)[['period','period_r','amplitude','acrophase']]
+        components = components.sort_values('amplitude',ascending=False).reset_index(drop=True)
+        curve = self.multicomponent_cosinor(self.time, *params)
+
+        return mesor, components, curve, self.time
+
+    def fit24(self, fixed=False, acroWrap=False):
         """
         Fit a 24-hour component to the input signal.
 
         Parameters:
             fixed (bool, optional): Whether to fix the period to 24 hours. If True, the period will be fixed, otherwise it will be optimized. Default is False.
-
+            acroWrap (bool,optional): force acrophase to 0 24h
         Returns:
             None
         """
@@ -528,84 +547,98 @@ class Cosinor:
         self.components['mesor'] = self.params[0]
         self.components['amplitude'] = [self.params[1]]
         self.components['period'] = [self.params[2]]
-        self.components['acrophase'] = [np.round( self.params[3] % 24, 3 )]
+        if acroWrap:
+            self.components['acrophase'] = [np.round( self.params[3] % 24, 3 )]
+        else:
+            self.components['acrophase'] = [np.round( self.params[3], 3 )]
+
+        self.curve = self.multicomponent_cosinor(self.time, *self.params)
+        self.components['r2'] = self.calculate_r2_score(self.signal, self.curve)
 
         self.components = pd.DataFrame(self.components)
-        self.curve = self.multicomponent_cosinor(self.time, *self.params)
 
-   def fitComponent(self,component=24, fixed=False):
-       """
-        Fit a specific component to the input signal.
 
-        Parameters:
-            component (float, optional): The period of the component to fit. Default is 24.
-
-        Returns:
-            tuple: A tuple containing the component's information (amplitude, period, acrophase), the fitted curve, and the time points.
+    def fitComponent(self,component=24, fixed=False, acrowrap=True):
         """
-       estim_mesor = np.mean(self.signal)
-       estim_acrophase = self.time[np.argmax(self.signal)]
-       estim_amplitude = self.component_amp(self.signal, component, self.fs) #np.max(self.signal)-np.min(self.signal)
-       p0 = [estim_mesor,estim_amplitude,component,estim_acrophase]
+         Fit a specific component to the input signal.
 
-       if fixed:
-           bounds = [[-np.inf,0,component-0.01,0], [np.inf,np.inf,component+0.01, self.time[-1]*2]]
-       else:
-           bounds = [[-np.inf,0,0,0], [np.inf,np.inf,200, self.time[-1]*2]]
+         Parameters:
+             component (float, optional): The period of the component to fit. Default is 24.
+            acroWrap (bool,optional): force acrophase to 0 24h
+         Returns:
+             tuple: A tuple containing the component's information (amplitude, period, acrophase), the fitted curve, and the time points.
+         """
+        estim_mesor = np.mean(self.signal)
+        estim_acrophase = self.time[np.argmax(self.signal)]
+        estim_amplitude = self.component_amp(self.signal, component, self.fs) #np.max(self.signal)-np.min(self.signal)
+        p0 = [estim_mesor,estim_amplitude,component,estim_acrophase]
 
-       params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=p0, bounds=bounds)
-       component = dict()
-       component['mesor'] = params[0]
-       component['amplitude'] = [params[1]]
-       component['period'] = [params[2]]
-       component['acrophase'] = [np.round( params[3] % 24, 3 )]
+        if fixed:
+            bounds = [[-np.inf,0,component-0.01,0], [np.inf,np.inf,component+0.01, self.time[-1]*2]]
+        else:
+            bounds = [[-np.inf,0,0,0], [np.inf,np.inf,200, self.time[-1]*2]]
 
-       component = pd.DataFrame(component)[['mesor','period','amplitude','acrophase']]
-       curve = self.multicomponent_cosinor(self.time, *params)
+        params, _ = curve_fit(self.multicomponent_cosinor, self.time, self.signal, p0=p0, bounds=bounds)
+        component = dict()
+        component['mesor'] = params[0]
+        component['amplitude'] = [params[1]]
+        component['period'] = [params[2]]
+        if acrowrap:
+            component['acrophase'] = [np.round( params[3] % 24, 3 )]
+        else:
+            component['acrophase'] = [np.round( params[3], 3 )]
 
-       return component,curve,self.time
+        curve = self.multicomponent_cosinor(self.time, *params)
+        component['r2'] = self.calculate_r2_score(self.signal, curve)
+        component = pd.DataFrame(component)[['mesor','period','amplitude','acrophase','r2']]
 
-   @staticmethod
-   def multicomponent_cosinor(x, mesor, *args):
-       """
-        Calculate the multicomponent cosinor curve.
+        return component,curve,self.time
 
-        Parameters:
-            x (array-like): The time points.
-            mesor (float): The mesor value.
-            args (array-like): The parameters of the components (amplitude, period, acrophase).
-
-        Returns:
-            array-like: The calculated cosinor curve.
+    @staticmethod
+    def multicomponent_cosinor(x, mesor, *args):
         """
-       num_components = len(args) // 3
-       result = np.full_like(x, mesor)
+         Calculate the multicomponent cosinor curve.
 
-       for i in range(num_components):
-           amplitude = args[3 * i]
-           period = args[3 * i + 1]
-           acrophase = args[3 * i + 2]
-           result += amplitude * np.cos((2 * np.pi * (x - acrophase)) / period)
+         Parameters:
+             x (array-like): The time points.
+             mesor (float): The mesor value.
+             args (array-like): The parameters of the components (amplitude, period, acrophase).
 
-       return result
+         Returns:
+             array-like: The calculated cosinor curve.
+         """
+        num_components = len(args) // 3
+        result = np.full_like(x, mesor)
 
-   @staticmethod
-   def component_amp(input_signal, target_period, sampling_frequency):
-       """
-        Calculate the amplitude of a component using periodogram analysis.
+        for i in range(num_components):
+            amplitude = args[3 * i]
+            period = args[3 * i + 1]
+            acrophase = args[3 * i + 2]
+            result += amplitude * np.cos((2 * np.pi * (x - acrophase)) / period)
 
-        Parameters:
-            input_signal (array-like): The input signal.
-            target_period (float): The period of the component.
-            sampling_frequency (int): The sampling frequency in Hz.
+        return result
 
-        Returns:
-            float: The amplitude of the component.
+    @staticmethod
+    def component_amp(input_signal, target_period, sampling_frequency):
         """
-       frequencies, psd = signal.periodogram(input_signal, fs=sampling_frequency)
-       interpolation_func = interp1d(frequencies, psd, kind='linear')
-       psd = interpolation_func(1/target_period)
-       return np.sqrt( psd  )
+         Calculate the amplitude of a component using periodogram analysis.
+
+         Parameters:
+             input_signal (array-like): The input signal.
+             target_period (float): The period of the component.
+             sampling_frequency (int): The sampling frequency in Hz.
+
+         Returns:
+             float: The amplitude of the component.
+         """
+        frequencies, psd = signal.periodogram(input_signal, fs=sampling_frequency)
+        interpolation_func = interp1d(frequencies, psd, kind='linear')
+        psd = interpolation_func(1/target_period)
+        return np.sqrt( psd  )
+    @staticmethod
+    def calculate_r2_score(y_true, y_pred):
+        r2 = r2_score(y_true, y_pred)
+        return r2
 
 
 class CrossCorrelation:
