@@ -365,11 +365,12 @@ class Periodogram:
              periodogram.plot(signi=True)
          """
 
+        #signal_input = signal_input * np.hanning(len(signal_input))
         frequencies, power_spectrum = signal.periodogram(signal_input, fs)
         self.power_spectrum =  np.insert(np.flip(power_spectrum[1:]),0,power_spectrum[0])
         self.period =  np.insert(np.flip(1 / frequencies[1:]),0,0)
 
-        poi = np.where((self.period>=1) & (self.period<=72) )[0]
+        poi = np.where((self.period>0.8) & (self.period<=72) )[0]
         self.period = self.period[poi]
         self.power_spectrum = self.power_spectrum[poi]
         self.interp_func = interp1d(self.period, self.power_spectrum, kind='linear')
