@@ -365,7 +365,7 @@ class Periodogram:
              periodogram.plot(signi=True)
          """
 
-        #signal_input = signal_input * np.hanning(len(signal_input))
+        signal_input = signal_input * np.hanning(len(signal_input))
         frequencies, power_spectrum = signal.periodogram(signal_input, fs)
         self.power_spectrum =  np.insert(np.flip(power_spectrum[1:]),0,power_spectrum[0])
         self.period =  np.insert(np.flip(1 / frequencies[1:]),0,0)
